@@ -1,0 +1,7 @@
+#include "resources.h"
+
+IDR_MAP_PNG RCDATA "assets/map.png"
+IDR_HOOPS_PNG RCDATA "assets/hoops.png"
+IDR_MAX_PNG RCDATA "assets/max.png"
+IDR_PETE_PNG RCDATA "assets/pete.png"
+IDR_WILLOW_PNG RCDATA "assets/willow.png"

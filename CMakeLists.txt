@@ -22,11 +22,35 @@ add_library(grounded_minimap SHARED
         hook_helper.cpp
         hook_helper.h
         minimap.cpp
-        minimap.h)
+        minimap.h
+        resources.h
+        resources.rc
+        shared_types.cpp
+        shared_types.h
+        game_handler.cpp
+        game_handler.h
+        memory.cpp
+        memory.h
+        structs/f_name.cpp
+        structs/f_name.h
+        structs/u_world.cpp
+        structs/u_world.h
+        structs/u_object.cpp
+        structs/u_object.h
+        structs/u_game_instance.cpp
+        structs/u_game_instance.h
+        structs/t_array.cpp
+        structs/t_array.h
+        structs/u_widget_manager.cpp
+        structs/u_widget_manager.h
+        structs/a_game_state_base.cpp
+        structs/a_game_state_base.h)
 
 target_link_libraries(grounded_minimap PRIVATE d3d12 dxgi)
 
 add_subdirectory(third_party)
+
+set_source_files_properties(resources.rc PROPERTIES LANGUAGE RC)
 
 add_custom_command(TARGET grounded_minimap POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:grounded_minimap>" "${MODS_DIR}/")

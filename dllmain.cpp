@@ -1,6 +1,7 @@
 #include <windows.h>
 
 #include "config.h"
+#include "game_handler.h"
 #include "globals.h"
 #include "logger.h"
 #include "utils.h"
@@ -57,7 +58,13 @@ DWORD WINAPI OnProcessAttach(LPVOID lpvThreadParameter) {
         Globals::gGameWindow = FindWindowW(L"UnrealWindow", L"Grounded");
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    Globals::gGameExe = GetGameExe();
+    if (Globals::gGameExe.empty()) {
+        Logger::Error("Failed to get game executable name");
+    }
+    Logger::Info("Game executable: " + Globals::gGameExe);
 
+    GameHandler::Initialize();
     HookHelper::Hook();
     Minimap::Initialize();
 

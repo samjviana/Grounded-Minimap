@@ -3,9 +3,13 @@
 //
 
 #include "minimap.h"
+#include "game_handler.h"
+#include "globals.h"
 #include "hook_helper.h"
 #include "logger.h"
-#include "globals.h"
+#include "resources.h"
+#include "structs/u_world.h"
+#include "utils.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_dx12.h>
@@ -13,6 +17,8 @@
 
 // This needs to be defined globally
 IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+using namespace structs;
 
 namespace grounded_minimap {
 
@@ -26,13 +32,14 @@ ID3D12DescriptorHeap* Minimap::srvHeap_ = nullptr;
 ID3D12DescriptorHeap* Minimap::rtvHeap_ = nullptr;
 int Minimap::textureCount_;
 uint64_t Minimap::oWndProc_ = 0;
+std::unordered_map<std::string, TextureInfo> Minimap::assets_;
 
 void Minimap::Initialize() {
     HookHelper::SetRenderCallback(Render);
     HookHelper::SetCleanupCallback(CleanupRenderTargets);
     HookHelper::SetCommandQueue(&commandQueue_);
 
-    textureCount_ = 1;
+    textureCount_ = CountPngResources(Globals::gModule);
 
     if (ImGui::GetCurrentContext()) {
         return;
@@ -84,6 +91,7 @@ void Minimap::Render(IDXGISwapChain3 *pSwapChain) {
     }
 
     InitializeDXResources(pSwapChain);
+    InitializeFileResources(device);
     InitializeRenderTargets(pSwapChain);
 
     if (!ImGui::GetCurrentContext()) {
@@ -91,14 +99,12 @@ void Minimap::Render(IDXGISwapChain3 *pSwapChain) {
         return;
     }
 
+
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    // Hello, world!
-    ImGui::Begin("Hello, world!");
-    ImGui::Text("This is some useful text.");
-    ImGui::End();
+    DrawMinimap(device);
 
     ImGui::EndFrame();
 
@@ -231,6 +237,12 @@ void Minimap::InitializeDXResources(IDXGISwapChain3 *pSwapChain) {
     oWndProc_ = SetWindowLongPtrW(Globals::gGameWindow, GWLP_WNDPROC, (LONG_PTR)WndProc);
 }
 
+void Minimap::InitializeFileResources(ID3D12Device *device) {
+    if (assets_.empty()) {
+        LoadAllTexturesResources(device);
+    }
+}
+
 void Minimap::InitializeRenderTargets(IDXGISwapChain3 *pSwapChain) {
     DXGI_SWAP_CHAIN_DESC sd;
     pSwapChain->GetDesc(&sd);
@@ -265,12 +277,43 @@ void Minimap::InitializeRenderTargets(IDXGISwapChain3 *pSwapChain) {
     device->Release();
 }
 
-LRESULT Minimap::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    if (ImGui::GetCurrentContext()) {
-        ImGui_ImplWin32_WndProcHandler(hWnd, uMsg, wParam, lParam);
+void Minimap::DrawMinimap(ID3D12Device *device) {
+    UWorld* world = GameHandler::GetWorld();
+    if (!world) {
+        return;
     }
 
-    return CallWindowProcW(reinterpret_cast<WNDPROC>(oWndProc_), hWnd, uMsg, wParam, lParam);
+    std::string name = GameHandler::FNameToString(world->namePrivate);
+    if (name == "MainMenu" || name == "None" || name == "Null" || name == "CompanyIntro") {
+        return;
+    }
+
+    UGameInstance* gameInstance = world->owningGameInstance;
+    if (!gameInstance) {
+        return;
+    }
+    UWidgetManager* widgetManager = gameInstance->widgetManager;
+    if (!widgetManager) {
+        return;
+    }
+
+    if (widgetManager->windowStack.count != 0) {
+        return;
+    }
+
+    AGameStateBase* gameState = world->gameState;
+    if (!gameState) {
+        return;
+    }
+
+    if (!gameState->replicatedHasBegunPlay || gameState->replicatedWorldTimeSeconds <= 0.0f) {
+        return;
+    }
+
+    // Hello, world!
+    ImGui::Begin("Hello, world!");
+    ImGui::Text("This is some useful text.");
+    ImGui::End();
 }
 
 int Minimap::GetCorrectDXGIFormat(int eCurrentFormat) {
@@ -279,6 +322,43 @@ int Minimap::GetCorrectDXGIFormat(int eCurrentFormat) {
     }
 
     return eCurrentFormat;
+}
+
+void Minimap::LoadAllTexturesResources(ID3D12Device *device) {
+    std::unordered_map<std::string, int> resources = {
+            {"map.png", IDR_MAP_PNG},
+            {"hoops.png", IDR_HOOPS_PNG},
+            {"max.png", IDR_MAX_PNG},
+            {"pete.png", IDR_PETE_PNG},
+            {"willow.png", IDR_WILLOW_PNG}
+    };
+
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpuHandle = srvHeap_->GetCPUDescriptorHandleForHeapStart();
+    SIZE_T descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    srvCpuHandle.ptr += descriptorSize;
+
+    int textureIndex = 1;
+    for (const auto& [fileName, resourceID] : resources) {
+        TextureInfo textureInfo = {};
+
+        if (LoadTextureFromResource(resourceID, Globals::gModule, device, srvCpuHandle, &textureInfo)) {
+            textureInfo.index = textureIndex++;
+            assets_[fileName] = textureInfo;
+            Logger::Info(std::format("Loaded texture: {}", fileName));
+
+            srvCpuHandle.ptr += descriptorSize;
+        } else {
+            Logger::Error(std::format("Texture {} failed to load", fileName));
+        }
+    }
+}
+
+LRESULT Minimap::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (ImGui::GetCurrentContext()) {
+        ImGui_ImplWin32_WndProcHandler(hWnd, uMsg, wParam, lParam);
+    }
+
+    return CallWindowProcW(reinterpret_cast<WNDPROC>(oWndProc_), hWnd, uMsg, wParam, lParam);
 }
 
 } // grounded_minimap
