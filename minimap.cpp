@@ -2,6 +2,8 @@
 // Created by PC-SAMUEL on 20/12/2024.
 //
 
+#define NOMINMAX
+
 #include "minimap.h"
 #include "game_handler.h"
 #include "globals.h"
@@ -10,8 +12,12 @@
 #include "resources.h"
 #include "structs/u_world.h"
 #include "utils.h"
+#include "config.h"
 
+#include <cmath>
+#include <numbers>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <backends/imgui_impl_dx12.h>
 #include <backends/imgui_impl_win32.h>
 
@@ -39,7 +45,7 @@ void Minimap::Initialize() {
     HookHelper::SetCleanupCallback(CleanupRenderTargets);
     HookHelper::SetCommandQueue(&commandQueue_);
 
-    textureCount_ = CountPngResources(Globals::gModule);
+    textureCount_ = CountPngResources(Globals::gModule) + 1;
 
     if (ImGui::GetCurrentContext()) {
         return;
@@ -80,7 +86,6 @@ void Minimap::Uninitialize() {
 
 void Minimap::Render(IDXGISwapChain3 *pSwapChain) {
     if (commandQueue_ == nullptr) {
-        Logger::Error("Command queue is null.");
         return;
     }
 
@@ -98,7 +103,6 @@ void Minimap::Render(IDXGISwapChain3 *pSwapChain) {
         device->Release();
         return;
     }
-
 
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
@@ -277,6 +281,85 @@ void Minimap::InitializeRenderTargets(IDXGISwapChain3 *pSwapChain) {
     device->Release();
 }
 
+constexpr float DegreesToRadians(float degrees) {
+    return degrees * (std::numbers::pi_v<float> / 180.0f);
+}
+
+void ShowRotatedImage(ImTextureID texture, float angle_degrees, ImVec2 size = ImVec2(200, 200), ImVec2 uv1 = ImVec2(0.0f, 0.0f), ImVec2 uv2 = ImVec2(1.0f, 1.0f)) {
+    ImVec2 pos = ImGui::GetCursorScreenPos();
+
+    ImVec2 center = ImVec2(pos.x + size.x * 0.5f, pos.y + size.y * 0.5f);
+
+    float angle_rad = DegreesToRadians(angle_degrees);
+
+    float cos_theta = cosf(angle_rad);
+    float sin_theta = sinf(angle_rad);
+
+    ImVec2 top_left(-size.x * 0.5f, -size.y * 0.5f);
+    ImVec2 top_right(size.x * 0.5f, -size.y * 0.5f);
+    ImVec2 bottom_right(size.x * 0.5f, size.y * 0.5f);
+    ImVec2 bottom_left(-size.x * 0.5f, size.y * 0.5f);
+
+    auto rotate = [&](const ImVec2& p) -> ImVec2 {
+        return ImVec2(
+                p.x * cos_theta - p.y * sin_theta + center.x,
+                p.x * sin_theta + p.y * cos_theta + center.y
+        );
+    };
+
+    ImVec2 rotated_top_left = rotate(top_left);
+    ImVec2 rotated_top_right = rotate(top_right);
+    ImVec2 rotated_bottom_right = rotate(bottom_right);
+    ImVec2 rotated_bottom_left = rotate(bottom_left);
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    ImVec2 uv_top_left = uv1;
+    ImVec2 uv_top_right = ImVec2(uv2.x, uv1.y);
+    ImVec2 uv_bottom_right = uv2;
+    ImVec2 uv_bottom_left = ImVec2(uv1.x, uv2.y);
+
+    ImU32 tint_col = IM_COL32(255, 255, 255, 255); // No tint
+
+    draw_list->AddImageQuad(
+            texture,
+            rotated_top_left,
+            rotated_top_right,
+            rotated_bottom_right,
+            rotated_bottom_left,
+            uv_top_left,
+            uv_top_right,
+            uv_bottom_right,
+            uv_bottom_left,
+            tint_col
+    );
+
+    float min_x = rotated_top_left.x;
+    float max_x = rotated_top_left.x;
+    float min_y = rotated_top_left.y;
+    float max_y = rotated_top_left.y;
+
+    auto update_bounds = [&](const ImVec2& p) {
+        if (p.x < min_x) min_x = p.x;
+        if (p.x > max_x) max_x = p.x;
+        if (p.y < min_y) min_y = p.y;
+        if (p.y > max_y) max_y = p.y;
+    };
+
+    update_bounds(rotated_top_right);
+    update_bounds(rotated_bottom_right);
+    update_bounds(rotated_bottom_left);
+
+    ImGui::SetCursorScreenPos(ImVec2(min_x, max_y));
+}
+
+void CircleImage(ImTextureID user_texture_id, float diameter, const ImVec2& uv0, const ImVec2& uv1, const ImVec4& tint_col = ImVec4(1, 1, 1, 1)) {
+    ImVec2 p_min = ImGui::GetCursorScreenPos();
+    ImVec2 p_max = ImVec2(p_min.x + diameter, p_min.y + diameter);
+    ImGui::GetWindowDrawList()->AddImageRounded(user_texture_id, p_min, p_max, uv0, uv1, ImGui::GetColorU32(tint_col), diameter * 0.5f);
+    ImGui::Dummy(ImVec2(diameter, diameter));
+}
+
 void Minimap::DrawMinimap(ID3D12Device *device) {
     UWorld* world = GameHandler::GetWorld();
     if (!world) {
@@ -310,10 +393,121 @@ void Minimap::DrawMinimap(ID3D12Device *device) {
         return;
     }
 
-    // Hello, world!
-    ImGui::Begin("Hello, world!");
-    ImGui::Text("This is some useful text.");
+    if (gameInstance->localPlayers.count == 0) {
+        return;
+    }
+
+    ULocalPlayer* localPlayer = gameInstance->localPlayers.data[0];
+    if (!localPlayer) {
+        return;
+    }
+
+    APlayerController* playerController = localPlayer->playerController;
+    if (!playerController) {
+        return;
+    }
+
+    ACharacter* character = playerController->character;
+    if (!character) {
+        return;
+    }
+
+    APawn* pawn = playerController->acknowledgedPawn;
+    if (!pawn) {
+        return;
+    }
+
+    EPlayerCharacterIdentity characterIdentity = character->characterIdentity;
+    std::string characterName = GetCharacterName(characterIdentity);
+    if (characterName == "unknown") {
+        return;
+    }
+
+    FVector location = pawn->rootComponent->relativeLocation;
+    float tempX = location.x;
+    location.x = location.y;
+    location.y = -tempX;
+
+    float rotation = pawn->rootComponent->relativeRotation.y;
+
+    ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoBackground;
+    ImVec2 windowPosition = Config::position;
+    ImVec2 windowSize = Config::size;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::SetNextWindowPos(windowPosition);
+    ImGui::SetNextWindowSize(windowSize);
+
+    if (!ImGui::Begin("Minimap", nullptr, windowFlags)) {
+        ImGui::PopStyleVar();
+        return;
+    }
+
+    TextureInfo mapTexture = GetTexture("map.png");
+    if (!mapTexture.textureResource) {
+        ImGui::End();
+        ImGui::PopStyleVar();
+        return;
+    }
+
+    const float worldMinX = -100000.0f;
+    const float worldMinY = -100000.0f;
+    const float worldMaxX = 100000.0f;
+    const float worldMaxY = 100000.0f;
+
+    float regionWidth = (worldMaxX - worldMinX) / static_cast<float>(Config::zoom);
+    float regionHeight = (worldMaxY - worldMinY) / static_cast<float>(Config::zoom);
+
+    float regionMinX = location.x - (regionWidth / 2.0f);
+    float regionMinY = location.y - (regionHeight / 2.0f);
+
+    regionMinX = std::max(worldMinX, std::min(regionMinX, worldMaxX - regionWidth));
+    regionMinY = std::max(worldMinY, std::min(regionMinY, worldMaxY - regionHeight));
+
+    float uvMinX = (regionMinX - worldMinX) / (worldMaxX - worldMinX);
+    float uvMinY = (regionMinY - worldMinY) / (worldMaxY - worldMinY);
+    float uvMaxX = (regionMinX + regionWidth - worldMinX) / (worldMaxX - worldMinX);
+    float uvMaxY = (regionMinY + regionHeight - worldMinY) / (worldMaxY - worldMinY);
+
+    D3D12_GPU_DESCRIPTOR_HANDLE mapHandle = GetGpuDescriptorHandle(
+            srvHeap_->GetGPUDescriptorHandleForHeapStart(),
+            device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV),
+            mapTexture.index
+    );
+    auto mapTexID = static_cast<ImTextureID>(mapHandle.ptr);
+
+    ImGui::SetCursorPos(ImVec2(0, 0));
+    CircleImage(mapTexID, windowSize.x, ImVec2(uvMinX, uvMinY), ImVec2(uvMaxX, uvMaxY));
+
+    TextureInfo playerTexture = GetTexture(characterName + ".png");
+    if (!playerTexture.textureResource) {
+        ImGui::End();
+        ImGui::PopStyleVar();
+        return;
+    }
+
+    D3D12_GPU_DESCRIPTOR_HANDLE playerHandle = GetGpuDescriptorHandle(
+            srvHeap_->GetGPUDescriptorHandleForHeapStart(),
+            device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV),
+            playerTexture.index
+    );
+    auto playerTexID = static_cast<ImTextureID>(playerHandle.ptr);
+
+    ImVec2 playerSize = ImVec2(20, 20);
+
+    float relativeX = (location.x - regionMinX) / regionWidth;
+    float relativeY = (location.y - regionMinY) / regionHeight;
+
+    float scaledX = relativeX * windowSize.x;
+    float scaledY = relativeY * windowSize.y;
+
+    ImVec2 playerPosition = ImVec2(scaledX - (playerSize.x / 2), scaledY - (playerSize.y / 2));
+
+    ImGui::SetCursorPos(playerPosition);
+    ImGui::Image(playerTexID, playerSize);
+
     ImGui::End();
+    ImGui::PopStyleVar();
 }
 
 int Minimap::GetCorrectDXGIFormat(int eCurrentFormat) {
@@ -351,6 +545,15 @@ void Minimap::LoadAllTexturesResources(ID3D12Device *device) {
             Logger::Error(std::format("Texture {} failed to load", fileName));
         }
     }
+}
+
+TextureInfo Minimap::GetTexture(const std::string &textureName) {
+    if (assets_.find(textureName) != assets_.end()) {
+        return assets_[textureName];
+    }
+
+    Logger::Error("Texture not found: " + textureName);
+    return {};
 }
 
 LRESULT Minimap::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {

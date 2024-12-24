@@ -44,7 +44,21 @@ add_library(grounded_minimap SHARED
         structs/u_widget_manager.cpp
         structs/u_widget_manager.h
         structs/a_game_state_base.cpp
-        structs/a_game_state_base.h)
+        structs/a_game_state_base.h
+        structs/u_local_player.cpp
+        structs/u_local_player.h
+        structs/a_player_controller.cpp
+        structs/a_player_controller.h
+        structs/a_character.cpp
+        structs/a_character.h
+        structs/a_pawn.cpp
+        structs/a_pawn.h
+        structs/e_player_character_identity.cpp
+        structs/e_player_character_identity.h
+        structs/u_scene_component.cpp
+        structs/u_scene_component.h
+        structs/f_vector.cpp
+        structs/f_vector.h)
 
 target_link_libraries(grounded_minimap PRIVATE d3d12 dxgi)
 

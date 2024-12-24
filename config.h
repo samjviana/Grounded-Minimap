@@ -8,6 +8,7 @@
 #define GROUNDED_MINIMAP_CONFIG_H
 
 #include <string>
+#include "imgui.h"
 
 namespace grounded_minimap {
 
@@ -16,7 +17,10 @@ namespace grounded_minimap {
  */
 class Config {
 public:
-    static bool debug;  // Indicates whether debug mode is enabled.
+    static bool debug;      // Indicates whether debug mode is enabled.
+    static int zoom;        // The zoom level of the minimap.
+    static ImVec2 position; // The position of the minimap on the screen.
+    static ImVec2 size;     // The size of the minimap.
 
     /**
      * Loads configuration settings from a file.

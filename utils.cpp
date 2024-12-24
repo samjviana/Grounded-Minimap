@@ -47,6 +47,19 @@ std::string GetGameExe() {
     return "";
 }
 
+ImVec2 GetWindowSize(HWND hwnd) {
+    RECT rect;
+    if (GetClientRect(hwnd, &rect)) {
+        auto width = rect.right - rect.left;
+        auto height = rect.bottom - rect.top;
+        Logger::Info("Window size: " + std::to_string(width) + "x" + std::to_string(height));
+        return {static_cast<float>(width), static_cast<float>(height)};
+    } else {
+        Logger::Error("Failed to get window size");
+        return {0, 0};
+    }
+}
+
 BOOL CALLBACK EnumResourceNamesA(HMODULE hModule, LPCSTR lpType, LPSTR lpName, LONG_PTR lParam) {
     if (!IS_INTRESOURCE(lpName)) {
         return TRUE;
@@ -249,6 +262,26 @@ bool LoadTextureFromMemory(const void* data, size_t data_size, ID3D12Device* d3d
 
     stbi_image_free(image_data);
     return true;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE GetGpuDescriptorHandle(D3D12_GPU_DESCRIPTOR_HANDLE srvHeapStart, SIZE_T descriptorIncrementSize, int index) {
+    D3D12_GPU_DESCRIPTOR_HANDLE handle = {};
+    handle.ptr = srvHeapStart.ptr + descriptorIncrementSize * index;
+    return handle;
+}
+
+std::string GetCharacterName(structs::EPlayerCharacterIdentity playerCharacterIdentity) {
+    if (playerCharacterIdentity == structs::EPlayerCharacterIdentity::Max) {
+        return "max";
+    } else if (playerCharacterIdentity == structs::EPlayerCharacterIdentity::Hoops) {
+        return "hoops";
+    } else if (playerCharacterIdentity == structs::EPlayerCharacterIdentity::Pete) {
+        return "pete";
+    } else if (playerCharacterIdentity == structs::EPlayerCharacterIdentity::Willow) {
+        return "willow";
+    } else {
+        return "unknown";
+    }
 }
 
 } // grounded_minimap
